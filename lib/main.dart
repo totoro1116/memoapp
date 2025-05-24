@@ -419,10 +419,30 @@ class _BoardPageState extends State<BoardPage> {
                   // ── 更新ボタン ──
                   ElevatedButton(
                     onPressed: () {
+                      final latestTitle = titleController.text.trim();
+
+                      // ★タイトル未入力なら警告を表示して終了
+                      if (note.image == null && latestTitle.isEmpty) {
+                        showDialog(
+                          context: context,
+                          builder:
+                              (ctx) => AlertDialog(
+                                content: const Text('タイトルを入力してください'),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.of(ctx).pop(),
+                                    child: const Text('OK'),
+                                  ),
+                                ],
+                              ),
+                        );
+                        return;
+                      }
+
                       setState(() {
                         if (note.image == null) {
                           // テキストノートならタイトル／本文／テクスチャを更新
-                          note.title = titleController.text;
+                          note.title = latestTitle;
                           note.body =
                               bodyController.text.isNotEmpty
                                   ? bodyController.text
@@ -446,6 +466,7 @@ class _BoardPageState extends State<BoardPage> {
                     },
                     child: const Text('更新'),
                   ),
+
                   const SizedBox(height: 24),
                 ],
               ),
@@ -601,10 +622,29 @@ class _BoardPageState extends State<BoardPage> {
                       child: ElevatedButton(
                         onPressed: () {
                           // 1. コントローラーから最新値を取得
-                          final latestTitle = titleController.text;
+                          final latestTitle = titleController.text.trim();
                           final latestBody = bodyController.text;
 
-                          // 2. Noteを追加（追加ボタン用の場合。編集の場合は編集処理！）
+                          // ★ここに追加：タイトルが空欄ならエラー表示して保存しない
+                          if (latestTitle.isEmpty) {
+                            showDialog(
+                              context: context,
+                              builder:
+                                  (ctx) => AlertDialog(
+                                    content: const Text('タイトルを入力してください'),
+                                    actions: [
+                                      TextButton(
+                                        onPressed:
+                                            () => Navigator.of(ctx).pop(),
+                                        child: const Text('OK'),
+                                      ),
+                                    ],
+                                  ),
+                            );
+                            return;
+                          }
+
+                          // 2. Noteを追加
                           setState(() {
                             notes.add(
                               Note(
@@ -620,7 +660,30 @@ class _BoardPageState extends State<BoardPage> {
                             saveNotes();
                           });
 
-                          // 3. モーダルを閉じる
+                          // 3. ★ここで初回だけヒントを表示！
+                          if (!hasShownPinchHint) {
+                            hasShownPinchHint = true;
+                            box.put('shownPinchHint', true); // Hiveなどで記録
+                            showDialog(
+                              context: context,
+                              builder:
+                                  (ctx) => AlertDialog(
+                                    title: Text('ヒント'),
+                                    content: Text(
+                                      'ノートは2本指でピンチ操作すると、拡大・縮小できます！',
+                                    ),
+                                    actions: [
+                                      TextButton(
+                                        onPressed:
+                                            () => Navigator.of(ctx).pop(),
+                                        child: Text('OK'),
+                                      ),
+                                    ],
+                                  ),
+                            );
+                          }
+
+                          // 4. モーダルを閉じる
                           Navigator.pop(context);
                         },
                         child: const Text('完了'),
@@ -634,43 +697,6 @@ class _BoardPageState extends State<BoardPage> {
         );
       },
     );
-
-    // 入力があればリストに追加
-    if (tempTitle.trim().isNotEmpty) {
-      setState(() {
-        notes.add(
-          Note(
-            id: DateTime.now().toIso8601String(),
-            title: tempTitle,
-            body: tempBody.isNotEmpty ? tempBody : null,
-            texture: tempTexture,
-            color: selected,
-            alwaysOnTop: onTop,
-            zIndex: ++_zCounter,
-          ),
-        );
-        saveNotes();
-      });
-      // ★ ここから追加！初回のみピンチヒントダイアログ表示 ★
-      if (!hasShownPinchHint) {
-        hasShownPinchHint = true;
-        box.put('shownPinchHint', true); // Hiveなどに保存
-        showDialog(
-          context: context,
-          builder:
-              (ctx) => AlertDialog(
-                title: Text('ヒント'),
-                content: Text('ノートは2本指でピンチ操作すると、拡大・縮小できます！'),
-                actions: [
-                  TextButton(
-                    onPressed: () => Navigator.of(ctx).pop(),
-                    child: Text('OK'),
-                  ),
-                ],
-              ),
-        );
-      }
-    }
   }
 
   // ── 画像付箋追加 ──
@@ -1264,57 +1290,94 @@ class _BoardPageState extends State<BoardPage> {
                       // テキストノート（元のサイズで）
                       : SizedBox(
                         width: MediaQuery.of(context).size.width * 0.9,
-                        height: MediaQuery.of(context).size.width * 0.9 * 1.414,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: note.color.withAlpha((0.8 * 255).round()),
-                            image: DecorationImage(
-                              image: AssetImage(note.texture),
-                              fit: BoxFit.cover,
-                            ),
-                            border: Border.all(
-                              color:
-                                  note.alwaysOnTop
-                                      ? note.color
-                                      : Colors.transparent,
-                              width: 1.0,
-                            ),
-                            boxShadow: const [
-                              BoxShadow(blurRadius: 4, offset: Offset(2, 2)),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(24),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.stretch,
-                            children: [
-                              SelectableText(
-                                note.title,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.black87,
-                                  decoration: TextDecoration.none,
+                        height:
+                            MediaQuery.of(context).size.width * 0.9 * 1.414 +
+                            60, // ←少し余裕
+                        child: Stack(
+                          children: [
+                            // 1. プレビュー内容
+                            Container(
+                              width: double.infinity,
+                              height: double.infinity,
+                              decoration: BoxDecoration(
+                                color: note.color.withAlpha(
+                                  (0.8 * 255).round(),
                                 ),
+                                image: DecorationImage(
+                                  image: AssetImage(note.texture),
+                                  fit: BoxFit.cover,
+                                ),
+                                border: Border.all(
+                                  color:
+                                      note.alwaysOnTop
+                                          ? note.color
+                                          : Colors.transparent,
+                                  width: 1.0,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    blurRadius: 4,
+                                    offset: Offset(2, 2),
+                                  ),
+                                ],
                               ),
-                              if (note.body != null &&
-                                  note.body!.isNotEmpty) ...[
-                                const SizedBox(height: 16),
-                                Expanded(
-                                  child: SingleChildScrollView(
-                                    child: SelectableText(
-                                      note.body!,
-                                      style: const TextStyle(
-                                        fontSize: 18,
-                                        color: Colors.black87,
-                                        decoration: TextDecoration.none,
-                                      ),
+                              padding: const EdgeInsets.all(24),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                children: [
+                                  SelectableText(
+                                    note.title,
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      fontSize: 24,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.black87,
+                                      decoration: TextDecoration.none,
                                     ),
                                   ),
+                                  if (note.body != null &&
+                                      note.body!.isNotEmpty) ...[
+                                    const SizedBox(height: 16),
+                                    Expanded(
+                                      child: SingleChildScrollView(
+                                        child: SelectableText(
+                                          note.body!,
+                                          style: const TextStyle(
+                                            fontSize: 18,
+                                            color: Colors.black87,
+                                            decoration: TextDecoration.none,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            // 2. 右下にFAB（Containerの外側でもOKなようにAlign使用）
+                            Align(
+                              alignment: Alignment.bottomRight,
+                              child: Padding(
+                                padding: const EdgeInsets.only(
+                                  right: 16,
+                                  bottom: 16,
                                 ),
-                              ],
-                            ],
-                          ),
+                                child: FloatingActionButton(
+                                  heroTag: null,
+                                  mini: true,
+                                  backgroundColor: Colors.grey[200],
+                                  child: const Icon(
+                                    Icons.edit,
+                                    color: Colors.grey,
+                                  ),
+                                  onPressed: () {
+                                    Navigator.of(context).pop();
+                                    _showEditModal(note);
+                                  },
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
             ),
@@ -1355,7 +1418,7 @@ class _BoardPageState extends State<BoardPage> {
               ), // 余白調整
               alignment: Alignment.centerLeft,
               child: Text(
-                '設定',
+                'ぺたメモ。',
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
               ),
             ),
@@ -1461,10 +1524,10 @@ class _BoardPageState extends State<BoardPage> {
                 Navigator.pop(context);
                 showAboutDialog(
                   context: context,
-                  applicationName: 'MemoApp',
+                  applicationName: 'ぺたメモ。',
                   applicationVersion: 'v1.0.0',
-                  applicationLegalese: '© 2024 あなたの名前',
-                  children: [Text('お問い合わせ：example@email.com')],
+                  //applicationLegalese: '© 2024 あなたの名前',
+                  //children: [Text('お問い合わせ：example@email.com')],
                 );
               },
             ),
@@ -1500,7 +1563,7 @@ class _BoardPageState extends State<BoardPage> {
                                 return;
                               }
                               final email =
-                                  'your_email@example.com'; // ←あなたのアドレス
+                                  'kokoapp.info@gmail.com'; // ←あなたのアドレス
                               final subject = Uri.encodeComponent(
                                 'MemoApp お問い合わせ',
                               );
@@ -1526,9 +1589,18 @@ class _BoardPageState extends State<BoardPage> {
             ListTile(
               leading: Icon(Icons.privacy_tip),
               title: Text('プライバシーポリシー'),
-              onTap: () {
-                Navigator.pop(context);
-                // ここに規約リンク表示など
+              onTap: () async {
+                Navigator.pop(context); // 先にDrawerを閉じる
+                final url = Uri.parse(
+                  'https://totoro1116.github.io/privacy-policy/',
+                );
+                if (!await launchUrl(
+                  url,
+                  mode: LaunchMode.externalApplication,
+                )) {
+                  // 開けなかった場合のエラー（省略してもOK）
+                  throw 'Could not launch $url';
+                }
               },
             ),
           ],
